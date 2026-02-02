@@ -2,14 +2,17 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 )
 
 func Start() {
 	addr := ":6369"
+	// Create a TCP listening socket bound to the address.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
+		// if there is an error, fail fast like redis does
 		log.Fatalf("Fatal: could not start listener: %v", err)
 	}
 
@@ -17,24 +20,43 @@ func Start() {
 
 	log.Printf("GoRedis is listening on %s", addr)
 
+	// create a loop to wait for an Accept on the listener
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			// Hnadle Accept error
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				fmt.Printf("Timeout occurred, just waiting for the next caller...")
 				continue
 			}
 			log.Fatalf("Accept error: %v", err)
 		}
+		// once there is a connection, hand it off to another process using go concurrency so bloacking is avoided
 		go handleConnection(conn)
 	}
 }
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-
 	fmt.Println("Connection established successfully")
-	fmt.Println(conn)
+
+	buf := make([]byte, 1024)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				log.Printf("Connection disconnected or error: %v", err)
+				break
+			}
+		}
+		_, err = conn.Write(buf[:n])
+		if err != nil {
+			log.Printf("Error writing to connection: %v", err)
+			break
+		}
+	}
 }
 
 // func RetryWithBackoff(ln net.Listener) (net.Conn, error) {
