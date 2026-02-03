@@ -39,7 +39,7 @@ func Start() {
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Connection established successfully")
-
+	// create a buffer to read data from the connection and write it back to the client
 	buf := make([]byte, 1024)
 	for {
 		n, err := conn.Read(buf)
@@ -51,6 +51,7 @@ func handleConnection(conn net.Conn) {
 				break
 			}
 		}
+		// Echo the data back to the client
 		_, err = conn.Write(buf[:n])
 		if err != nil {
 			log.Printf("Error writing to connection: %v", err)
