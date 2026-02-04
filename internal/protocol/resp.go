@@ -2,6 +2,7 @@ package resp
 
 import (
 	"bytes"
+	"go/types"
 	"strconv"
 )
 
@@ -22,65 +23,99 @@ type Resp struct {
 	Array []*Resp
 }
 
-func Parser(buffer []byte) (*Resp, bool) {
+func Parser(buffer []byte) (*Resp, int, bool) {
 	if len(buffer) == 0 {
 		return nil, false
 	}
-	if buffer[0] == '+' {
-		idx := bytes.Index(buffer, []byte{'\r', '\n'})
+
+	switch buffer[0] {
+
+	case '+': // Simple String
+		idx := bytes.Index(buffer, []byte("\r\n"))
 		if idx == -1 {
 			return nil, false
-		} else {
-			message := buffer[1:idx]
-			resp := &Resp{
-				Type: SimpleString,
-				Str:  string(message),
-			}
-			return resp, true
 		}
-	} else if buffer[0] == '-' {
-		idx := bytes.Index(buffer, []byte{'\r', '\n'})
+		n, err := strconv.ParseInt(string(buffer[1:idx]), 10, 64)
+		return &Resp{
+			Type: SimpleString,
+			Str:  string(buffer[1:idx]),
+		}, n, true
+
+	case '-': // Error
+		idx := bytes.Index(buffer, []byte("\r\n"))
 		if idx == -1 {
 			return nil, false
-		} else {
-			resp := &Resp{
-				Type: Error,
-				Str:  string(buffer[1:idx]),
-			}
-			return resp, true
 		}
-	} else if buffer[0] == ':' {
-		idx := bytes.Index(buffer, []byte{'\r', '\n'})
+		n, err := strconv.ParseInt(string(buffer[1:idx]), 10, 64)
+		return &Resp{
+			Type: Error,
+			Str:  string(buffer[1:idx]),
+		}, n, true
+
+	case ':': // Integer
+		idx := bytes.Index(buffer, []byte("\r\n"))
 		if idx == -1 {
 			return nil, false
-		} else {
-			number := buffer[1:idx]
-			n, err := strconv.ParseInt(string(number), 10, 64)
-			if err != nil {
-				return nil, false
-			}
-			resp := &Resp{
-				Type: Integer,
-				Int:  n,
-			}
-			return resp, true
 		}
-	} else if buffer[0] == '$' {
-		idx := bytes.Index(buffer, []byte{'\r', '\n'})
+		n, err := strconv.ParseInt(string(buffer[1:idx]), 10, 64)
+		if err != nil {
+			return nil, false
+		}
+		return &Resp{
+			Type: Integer,
+			Int:  n,
+		}, n, true
+
+	case '$': // Bulk String
+		idx := bytes.Index(buffer, []byte("\r\n"))
 		if idx == -1 {
 			return nil, false
-		} else {
-			idxx := bytes.Index(buffer[idx+2:], []byte{'\r', '\n'})
-			message := buffer[idx+2 : idxx]
-			if len(message) == int(buffer[1]) {
-				resp := &Resp{
-					Type: Integer,
-					Str:  string(message),
-				}
-				return resp, true
-			} else {
-				return nil, false
-			}
+		}
+
+		length, err := strconv.Atoi(string(buffer[1:idx]))
+		if err != nil {
+			return nil, false
+		}
+
+		start := idx + 2
+		end := start + length
+
+		if len(buffer) < end+2 {
+			return nil, false
+		}
+
+		if !bytes.Equal(buffer[end:end+2], []byte("\r\n")) {
+			return nil, false
+		}
+		n, err := strconv.ParseInt(string(buffer[start:end]), 10, 64)
+		return &Resp{
+			Type: BulkString,
+			Str:  string(buffer[start:end]),
+		}, n, true
+
+	case '*': // Array
+		idx := bytes.Index(buffer, []byte("\r\n"))
+		if idx == -1 {
+			return nil, false
+		}
+
+		length, err := strconv.Atoi(string(buffer[1:idx]))
+		if err != nil {
+			return nil, false
+		}
+		buffer := buffer[idx+2:]
+		items = []*Resp{}
+		for i = 0; i < length; i++ {
+			resp, consumed := Parser(buffer)
+			items = append(items, resp)
+			
+			buffer := buffer[consumed:]
+		}
+		return &Resp{
+			Type: Array,
+			Array: items
 		}
 	}
+
+	return nil, false
 }
