@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"github.com/blvckbill/redis-from-scratch/internal/protocol"
 )
 
 func Start() {
@@ -49,14 +50,14 @@ func handleConnection(conn net.Conn) {
 			} else {
 				log.Printf("Connection disconnected or error: %v", err)
 				break
+			}	
+		}
+		readBuffer := buf[:n]
+		parsed_resp, consumed, bool := resp.Parser(buf[readBuffer])
+		if parsed_resp != nil && consumed != 0 && bool != false {
+				
 			}
-		}
-		// Echo the data back to the client
-		_, err = conn.Write(buf[:n])
-		if err != nil {
-			log.Printf("Error writing to connection: %v", err)
-			break
-		}
+		}	
 	}
 }
 
