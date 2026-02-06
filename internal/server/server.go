@@ -5,7 +5,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"github.com/blvckbill/redis-from-scratch/internal/protocol"
+
+	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
 )
 
 func Start() {
@@ -41,23 +42,44 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Connection established successfully")
 	// create a buffer to read data from the connection and write it back to the client
-	buf := make([]byte, 1024)
+	readBuf := make([]byte, 1024)
+	var buffer []byte
+
 	for {
-		n, err := conn.Read(buf)
+		n, err := conn.Read(readBuf)
 		if err != nil {
 			if err == io.EOF {
 				break
 			} else {
 				log.Printf("Connection disconnected or error: %v", err)
 				break
-			}	
-		}
-		readBuffer := buf[:n]
-		parsed_resp, consumed, bool := resp.Parser(buf[readBuffer])
-		if parsed_resp != nil && consumed != 0 && bool != false {
-				
 			}
-		}	
+		}
+
+		buffer = append(buffer, readBuf[:n]...)
+		for {
+			parsedResp, consumed, ok := resp.Parser(buffer)
+			if !ok {
+				break
+			}
+			buffer = buffer[consumed:]
+
+			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
+
+		}
+	}
+}
+
+func commandExecution(resp *Resp) *Resp {
+	if resp.Type != Array {
+		return nil
+	}
+	if len(resp.Array) == 0 {
+		return nil
+	}
+	command := resp.Array[0]
+	if command.Type == BulkString {
+
 	}
 }
 
