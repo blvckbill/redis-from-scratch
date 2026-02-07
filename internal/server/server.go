@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 
 	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
 )
@@ -63,24 +64,58 @@ func handleConnection(conn net.Conn) {
 				break
 			}
 			buffer = buffer[consumed:]
-
+			
 			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
-
+			commandExecution(parsedResp)
 		}
 	}
 }
 
-func commandExecution(resp *Resp) *Resp {
-	if resp.Type != Array {
-		return nil
+func commandExecution(r *resp.Resp) *resp.Resp {
+	if r.Type != resp.Array || len(r.Array) == 0 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR unknown command"),
+		}
 	}
-	if len(resp.Array) == 0 {
-		return nil
-	}
-	command := resp.Array[0]
-	if command.Type == BulkString {
 
+	cmd := strings.ToUpper(*r.Array[0].Str)
+
+	switch cmd {
+	case "PING":
+		return handlePing(r.Array[1:])
+	default:
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR unknown command"),
+		}
 	}
+}
+
+func handlePing(args []*resp.Resp) *resp.Resp {
+	if len(args) == 0 {
+		return &resp.Resp{
+			Type: resp.SimpleString,
+			Str:  strPtr("PONG"),
+		}
+	}
+
+	// PING with message
+	if args[0].Type == resp.BulkString && args[0].Str != nil {
+		return &resp.Resp{
+			Type: resp.BulkString,
+			Str:  args[0].Str,
+		}
+	}
+
+	return &resp.Resp{
+		Type: resp.Error,
+		Str:  strPtr("ERR invalid PING"),
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 // func RetryWithBackoff(ln net.Listener) (net.Conn, error) {
