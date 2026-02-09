@@ -64,7 +64,7 @@ func handleConnection(conn net.Conn) {
 				break
 			}
 			buffer = buffer[consumed:]
-			
+
 			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
 			commandExecution(parsedResp)
 		}
@@ -84,6 +84,8 @@ func commandExecution(r *resp.Resp) *resp.Resp {
 	switch cmd {
 	case "PING":
 		return handlePing(r.Array[1:])
+	case "ECHO":
+		return handleEcho(r.Array[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,
@@ -101,6 +103,27 @@ func handlePing(args []*resp.Resp) *resp.Resp {
 	}
 
 	// PING with message
+	if args[0].Type == resp.BulkString && args[0].Str != nil {
+		return &resp.Resp{
+			Type: resp.BulkString,
+			Str:  args[0].Str,
+		}
+	}
+
+	return &resp.Resp{
+		Type: resp.Error,
+		Str:  strPtr("ERR invalid PING"),
+	}
+}
+
+func handleEcho(args []*resp.Resp) *resp.Resp {
+	if len(args) != 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR nothing to ECHO"),
+		}
+	}
+
 	if args[0].Type == resp.BulkString && args[0].Str != nil {
 		return &resp.Resp{
 			Type: resp.BulkString,
