@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 
 	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
@@ -66,13 +67,26 @@ func handleConnection(conn net.Conn) {
 			buffer = buffer[consumed:]
 
 			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
-			commandExecution(parsedResp)
+			parsed := commandExecution(parsedResp)
+			bytes_parsed := respEncoder(parsed)
+
+			_, err := conn.Write(bytes_parsed)
+
+			if err != nil {
+				log.Printf("Error writing to connection: %v", err)
+				return
+			}
+			fmt.Printf("Sent response: %s", string(bytes_parsed))
 		}
 	}
 }
 
+// listen for conn - call accept - read from conn into buffer - call parser on buffer after completion - returns structured resp - if command, handle using command execution - returns resp object in structured format - encode back into bytes - write to conn
 func commandExecution(r *resp.Resp) *resp.Resp {
-	if r.Type != resp.Array || len(r.Array) == 0 {
+	if len(r.Array) == 0 {
+		return nil
+	}
+	if r.Type != resp.Array {
 		return &resp.Resp{
 			Type: resp.Error,
 			Str:  strPtr("ERR unknown command"),
@@ -102,43 +116,105 @@ func handlePing(args []*resp.Resp) *resp.Resp {
 		}
 	}
 
-	// PING with message
-	if args[0].Type == resp.BulkString && args[0].Str != nil {
+	if len(args) > 1 {
 		return &resp.Resp{
-			Type: resp.BulkString,
-			Str:  args[0].Str,
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'ping' command"),
+		}
+	}
+
+	// PING with message
+	str, ok := respToString(args[0])
+	if !ok {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR invalid argument for 'PING'"),
 		}
 	}
 
 	return &resp.Resp{
-		Type: resp.Error,
-		Str:  strPtr("ERR invalid PING"),
+		Type: resp.BulkString,
+		Str:  &str,
 	}
 }
 
 func handleEcho(args []*resp.Resp) *resp.Resp {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return &resp.Resp{
 			Type: resp.Error,
 			Str:  strPtr("ERR nothing to ECHO"),
 		}
 	}
-
-	if args[0].Type == resp.BulkString && args[0].Str != nil {
+	for _, el := args {
+		
+	}
+	str, ok := respToString(echo_args)
+	if !ok {
 		return &resp.Resp{
-			Type: resp.BulkString,
-			Str:  args[0].Str,
+			Type: resp.Error,
+			Str:  strPtr("ERR invalid argument for 'ECHO'"),
 		}
 	}
 
 	return &resp.Resp{
-		Type: resp.Error,
-		Str:  strPtr("ERR invalid PING"),
+		Type: resp.BulkString,
+		Str:  &str,
 	}
 }
 
 func strPtr(s string) *string {
 	return &s
+}
+
+func respToString(r *resp.Resp) (string, bool) {
+	switch r.Type {
+	case resp.BulkString, resp.SimpleString:
+		if r.Str == nil {
+			return "", false
+		}
+		return *r.Str, true
+
+	case resp.Integer:
+		return fmt.Sprintf("%d", r.Int), true
+
+	default:
+		return "", false
+	}
+}
+
+func respEncoder(r *resp.Resp) []byte {
+	switch r.Type {
+
+	case resp.SimpleString:
+		return []byte("+" + *r.Str + "\r\n")
+
+	case resp.Error:
+		return []byte("-" + *r.Str + "\r\n")
+
+	case resp.Integer:
+		return []byte(":" + strconv.FormatInt(r.Int, 10) + "\r\n")
+
+	case resp.BulkString: //$4/r/nPING/r/n
+		if r.Str == nil {
+			return []byte("$-1\r\n")
+		}
+		s := *r.Str
+		return []byte("$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n")
+
+	case resp.Array: //*2\r\n$4\r\nECHO\r\n$5\r\nhello\r\n
+		if r.Array == nil {
+			return []byte("*-1\r\n")
+		}
+		var out []byte
+
+		out = append(out, []byte("*"+strconv.Itoa(len(r.Array))+"\r\n")...)
+
+		for _, el := range r.Array {
+			out = append(out, respEncoder(el)...)
+		}
+		return out
+	}
+	return []byte("-ERR unknown RESP type\r\n")
 }
 
 // func RetryWithBackoff(ln net.Listener) (net.Conn, error) {
