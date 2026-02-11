@@ -46,7 +46,7 @@ func handleConnection(conn net.Conn) {
 	// create a buffer to read data from the connection and write it back to the client
 	readBuf := make([]byte, 1024)
 	var buffer []byte
-
+	// create a loop to read from the connection into the buffer and write back to the client
 	for {
 		n, err := conn.Read(readBuf)
 		if err != nil {
@@ -57,17 +57,20 @@ func handleConnection(conn net.Conn) {
 				break
 			}
 		}
-
+		// append the read data to the buffer and try to parse it as RESP
 		buffer = append(buffer, readBuf[:n]...)
 		for {
+			// Try to parse the buffer as RESP, if successful, execute the command and write the response back to the client
 			parsedResp, consumed, ok := resp.Parser(buffer)
 			if !ok {
 				break
 			}
+			// Remove the parsed command from the buffer
 			buffer = buffer[consumed:]
 
 			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
-			parsed := commandExecution(parsedResp)
+			// Execute the command and write the response back to the client
+			parsed := commandExecution(ParsedRespToStrings(parsedResp))
 			bytes_parsed := respEncoder(parsed)
 
 			_, err := conn.Write(bytes_parsed)
@@ -81,25 +84,22 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-// listen for conn - call accept - read from conn into buffer - call parser on buffer after completion - returns structured resp - if command, handle using command execution - returns resp object in structured format - encode back into bytes - write to conn
-func commandExecution(r *resp.Resp) *resp.Resp {
-	if len(r.Array) == 0 {
+/*
+commandExecution takes a slice of strings representing the command and its arguments,
+executes the command, and returns a RESP response.
+*/
+func commandExecution(argv []string) *resp.Resp {
+	if len(argv) == 0 {
 		return nil
 	}
-	if r.Type != resp.Array {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR unknown command"),
-		}
-	}
 
-	cmd := strings.ToUpper(*r.Array[0].Str)
+	cmd := strings.ToUpper(argv[0])
 
 	switch cmd {
 	case "PING":
-		return handlePing(r.Array[1:])
+		return handlePing(argv[1:])
 	case "ECHO":
-		return handleEcho(r.Array[1:])
+		return handleEcho(argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,
@@ -108,7 +108,13 @@ func commandExecution(r *resp.Resp) *resp.Resp {
 	}
 }
 
-func handlePing(args []*resp.Resp) *resp.Resp {
+/*
+handlePing takes the arguments for the PING command and returns a RESP response.
+If no arguments are provided, it returns "PONG".
+If one argument is provided, it returns that argument as a bulk string.
+If more than one argument is provided, it returns an error.
+*/
+func handlePing(args []string) *resp.Resp {
 	if len(args) == 0 {
 		return &resp.Resp{
 			Type: resp.SimpleString,
@@ -123,49 +129,44 @@ func handlePing(args []*resp.Resp) *resp.Resp {
 		}
 	}
 
-	// PING with message
-	str, ok := respToString(args[0])
-	if !ok {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR invalid argument for 'PING'"),
-		}
-	}
-
+	s := args[0]
 	return &resp.Resp{
 		Type: resp.BulkString,
-		Str:  &str,
+		Str:  &s,
 	}
 }
 
-func handleEcho(args []*resp.Resp) *resp.Resp {
+/*
+handleEcho takes the arguments for the ECHO command and returns a RESP response.
+If no arguments are provided, it returns an error.
+If one or more arguments are provided, it concatenates them with spaces and returns the result as a bulk string.
+*/
+func handleEcho(args []string) *resp.Resp {
 	if len(args) < 1 {
 		return &resp.Resp{
 			Type: resp.Error,
 			Str:  strPtr("ERR nothing to ECHO"),
 		}
 	}
-	for _, el := args {
-		
-	}
-	str, ok := respToString(echo_args)
-	if !ok {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR invalid argument for 'ECHO'"),
-		}
-	}
 
+	s := strings.Join(args, " ")
 	return &resp.Resp{
 		Type: resp.BulkString,
-		Str:  &str,
+		Str:  &s,
 	}
 }
 
+// strPtr is a helper function to create a pointer to a string literal.
 func strPtr(s string) *string {
 	return &s
 }
 
+/*
+respToString takes a RESP object and converts it to a string if possible.
+It returns the string and a boolean indicating whether the conversion was successful.
+Only RESP types that can be represented as strings (BulkString, SimpleString, Integer) are converted.
+Other types will return an empty string and false.
+*/
 func respToString(r *resp.Resp) (string, bool) {
 	switch r.Type {
 	case resp.BulkString, resp.SimpleString:
@@ -182,6 +183,27 @@ func respToString(r *resp.Resp) (string, bool) {
 	}
 }
 
+/*
+ParsedRespToStrings takes a parsed RESP command and converts
+it to a slice of strings representing the command and its arguments.
+*/
+func ParsedRespToStrings(r *resp.Resp) []string {
+	var argv []string
+	for _, arg := range r.Array {
+		s, ok := respToString(arg)
+		if ok {
+			argv = append(argv, s)
+		}
+		log.Printf("Error converting RESP to string: %v", arg)
+	}
+	return argv
+}
+
+/*
+respEncoder takes a RESP object and encodes it into a byte slice that can be sent back to the client.
+It handles all RESP types (SimpleString, Error, Integer, BulkString, Array) and returns the appropriate RESP format as bytes.
+If an unknown RESP type is encountered, it returns an error message in RESP format.
+*/
 func respEncoder(r *resp.Resp) []byte {
 	switch r.Type {
 
@@ -216,19 +238,3 @@ func respEncoder(r *resp.Resp) []byte {
 	}
 	return []byte("-ERR unknown RESP type\r\n")
 }
-
-// func RetryWithBackoff(ln net.Listener) (net.Conn, error) {
-// 	backoff := 1 * time.Second
-
-// 	for i := 0; i < 3; i++ {
-// 		conn, err := ln.Accept()
-// 		if err == nil {
-// 			return conn, nil
-// 		}
-// 		fmt.Printf("Attemp %d failed, retrying in %v...", i+1, backoff)
-
-// 		time.Sleep(backoff)
-// 		backoff *= 2
-// 	}
-// 	return nil, fmt.Errorf("Failed after 3 attempts")
-// }
