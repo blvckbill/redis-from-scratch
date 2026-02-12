@@ -8,11 +8,14 @@ import (
 	"strconv"
 	"strings"
 
-	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
+	"github.com/blvckbill/redis-from-scratch/internal/protocol"
+	"github.com/blvckbill/redis-from-scratch/internal/store"
 )
 
 func Start() {
 	addr := ":6369"
+	// Initialize the in-memory store
+	var db = store.NewStore()
 	// Create a TCP listening socket bound to the address.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -70,8 +73,13 @@ func handleConnection(conn net.Conn) {
 
 			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
 			// Execute the command and write the response back to the client
-			parsed := commandExecution(ParsedRespToStrings(parsedResp))
-			bytes_parsed := respEncoder(parsed)
+			parsed, ok := ParsedRespToStrings(parsedResp)
+			if !ok {
+				log.Printf("Error parsing RESP to strings")
+				return
+			}
+			response := commandExecution(parsed)
+			bytes_parsed := respEncoder(response)
 
 			_, err := conn.Write(bytes_parsed)
 
@@ -108,54 +116,6 @@ func commandExecution(argv []string) *resp.Resp {
 	}
 }
 
-/*
-handlePing takes the arguments for the PING command and returns a RESP response.
-If no arguments are provided, it returns "PONG".
-If one argument is provided, it returns that argument as a bulk string.
-If more than one argument is provided, it returns an error.
-*/
-func handlePing(args []string) *resp.Resp {
-	if len(args) == 0 {
-		return &resp.Resp{
-			Type: resp.SimpleString,
-			Str:  strPtr("PONG"),
-		}
-	}
-
-	if len(args) > 1 {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR wrong number of arguments for 'ping' command"),
-		}
-	}
-
-	s := args[0]
-	return &resp.Resp{
-		Type: resp.BulkString,
-		Str:  &s,
-	}
-}
-
-/*
-handleEcho takes the arguments for the ECHO command and returns a RESP response.
-If no arguments are provided, it returns an error.
-If one or more arguments are provided, it concatenates them with spaces and returns the result as a bulk string.
-*/
-func handleEcho(args []string) *resp.Resp {
-	if len(args) < 1 {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR nothing to ECHO"),
-		}
-	}
-
-	s := strings.Join(args, " ")
-	return &resp.Resp{
-		Type: resp.BulkString,
-		Str:  &s,
-	}
-}
-
 // strPtr is a helper function to create a pointer to a string literal.
 func strPtr(s string) *string {
 	return &s
@@ -187,16 +147,17 @@ func respToString(r *resp.Resp) (string, bool) {
 ParsedRespToStrings takes a parsed RESP command and converts
 it to a slice of strings representing the command and its arguments.
 */
-func ParsedRespToStrings(r *resp.Resp) []string {
+func ParsedRespToStrings(r *resp.Resp) ([]string, bool) {
 	var argv []string
 	for _, arg := range r.Array {
 		s, ok := respToString(arg)
-		if ok {
-			argv = append(argv, s)
+		if !ok {
+			log.Printf("Error converting RESP to string: %v", arg)
+			return nil, false
 		}
-		log.Printf("Error converting RESP to string: %v", arg)
+		argv = append(argv, s)
 	}
-	return argv
+	return argv, true
 }
 
 /*
@@ -216,14 +177,14 @@ func respEncoder(r *resp.Resp) []byte {
 	case resp.Integer:
 		return []byte(":" + strconv.FormatInt(r.Int, 10) + "\r\n")
 
-	case resp.BulkString: //$4/r/nPING/r/n
+	case resp.BulkString: 
 		if r.Str == nil {
 			return []byte("$-1\r\n")
 		}
 		s := *r.Str
 		return []byte("$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n")
 
-	case resp.Array: //*2\r\n$4\r\nECHO\r\n$5\r\nhello\r\n
+	case resp.Array: 
 		if r.Array == nil {
 			return []byte("*-1\r\n")
 		}
