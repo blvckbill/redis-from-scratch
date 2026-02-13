@@ -68,7 +68,7 @@ func handleSet(args []string) *resp.Resp {
 	var ttl int64
 	// SET key value EX seconds
 	if len(args) == 4 && strings.ToUpper(args[2]) == "EX" {
-		ttl, _ := strconv.ParseInt(args[3], 10, 64)
+		ttl, _ = strconv.ParseInt(args[3], 10, 64)
 	}
 
 	db.Set(key, val, ttl)
@@ -76,5 +76,28 @@ func handleSet(args []string) *resp.Resp {
 	return &resp.Resp{
 		Type: resp.SimpleString,
 		Str:  strPtr("OK"),
+	}
+}
+
+func handleGet(args []string) *resp.Resp {
+	if len(args) != 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("Error wrong number of arguments for 'GET'"),
+		}
+	}
+
+	key := args[0]
+	val, ok := db.Get(key)
+	if !ok {
+		return &resp.Resp{
+			Type: resp.BulkString,
+			Str:  nil,
+		}
+	}
+
+	return &resp.Resp{
+		Type: resp.BulkString,
+		Str:  &val,
 	}
 }
