@@ -8,14 +8,23 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/blvckbill/redis-from-scratch/internal/protocol"
+	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
 	"github.com/blvckbill/redis-from-scratch/internal/store"
 )
 
-func Start() {
-	addr := ":6369"
-	// Initialize the in-memory store
+type Server struct {
+	store *store.Store
+}
+
+func NewServer(s *Server) *Server {
 	var db = store.NewStore()
+	return &Server{
+		store: db,
+	}
+}
+
+func (s *Server) Start() {
+	addr := ":6369"
 	// Create a TCP listening socket bound to the address.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -39,11 +48,11 @@ func Start() {
 			log.Fatalf("Accept error: %v", err)
 		}
 		// once there is a connection, hand it off to another process using go concurrency so bloacking is avoided
-		go handleConnection(conn)
+		go s.handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Connection established successfully")
 	// create a buffer to read data from the connection and write it back to the client
@@ -177,14 +186,14 @@ func respEncoder(r *resp.Resp) []byte {
 	case resp.Integer:
 		return []byte(":" + strconv.FormatInt(r.Int, 10) + "\r\n")
 
-	case resp.BulkString: 
+	case resp.BulkString:
 		if r.Str == nil {
 			return []byte("$-1\r\n")
 		}
 		s := *r.Str
 		return []byte("$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n")
 
-	case resp.Array: 
+	case resp.Array:
 		if r.Array == nil {
 			return []byte("*-1\r\n")
 		}
