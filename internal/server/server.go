@@ -16,7 +16,7 @@ type Server struct {
 	store *store.Store
 }
 
-func NewServer(s *Server) *Server {
+func NewServer() *Server {
 	var db = store.NewStore()
 	return &Server{
 		store: db,
@@ -87,7 +87,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				log.Printf("Error parsing RESP to strings")
 				return
 			}
-			response := commandExecution(parsed)
+			response := s.commandExecution(parsed)
 			bytes_parsed := respEncoder(response)
 
 			_, err := conn.Write(bytes_parsed)
@@ -105,7 +105,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 commandExecution takes a slice of strings representing the command and its arguments,
 executes the command, and returns a RESP response.
 */
-func commandExecution(argv []string) *resp.Resp {
+func (s *Server) commandExecution(argv []string) *resp.Resp {
 	if len(argv) == 0 {
 		return nil
 	}
@@ -114,9 +114,9 @@ func commandExecution(argv []string) *resp.Resp {
 
 	switch cmd {
 	case "PING":
-		return handlePing(argv[1:])
+		return s.handlePing(argv[1:])
 	case "ECHO":
-		return handleEcho(argv[1:])
+		return s.handleEcho(argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,

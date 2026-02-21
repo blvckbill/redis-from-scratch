@@ -13,7 +13,7 @@ If no arguments are provided, it returns "PONG".
 If one argument is provided, it returns that argument as a bulk string.
 If more than one argument is provided, it returns an error.
 */
-func handlePing(args []string) *resp.Resp {
+func (srv *Server) handlePing(args []string) *resp.Resp {
 	if len(args) == 0 {
 		return &resp.Resp{
 			Type: resp.SimpleString,
@@ -40,7 +40,7 @@ handleEcho takes the arguments for the ECHO command and returns a RESP response.
 If no arguments are provided, it returns an error.
 If one or more arguments are provided, it concatenates them with spaces and returns the result as a bulk string.
 */
-func handleEcho(args []string) *resp.Resp {
+func (srv *Server) handleEcho(args []string) *resp.Resp {
 	if len(args) < 1 {
 		return &resp.Resp{
 			Type: resp.Error,
@@ -55,7 +55,7 @@ func handleEcho(args []string) *resp.Resp {
 	}
 }
 
-func handleSet(args []string) *resp.Resp {
+func (srv *Server) handleSet(args []string) *resp.Resp {
 	if len(args) < 2 {
 		return &resp.Resp{
 			Type: resp.Error,
@@ -71,7 +71,7 @@ func handleSet(args []string) *resp.Resp {
 		ttl, _ = strconv.ParseInt(args[3], 10, 64)
 	}
 
-	db.Set(key, val, ttl)
+	&srv.store.Set(key, val, ttl)
 
 	return &resp.Resp{
 		Type: resp.SimpleString,
@@ -79,7 +79,7 @@ func handleSet(args []string) *resp.Resp {
 	}
 }
 
-func handleGet(args []string) *resp.Resp {
+func (srv *Server) handleGet(args []string) *resp.Resp {
 	if len(args) != 1 {
 		return &resp.Resp{
 			Type: resp.Error,
