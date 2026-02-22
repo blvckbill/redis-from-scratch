@@ -112,11 +112,19 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 
 	cmd := strings.ToUpper(argv[0])
 
-	switch cmd {
+	switch cmd { // refactor to use interfaces
 	case "PING":
 		return s.handlePing(argv[1:])
 	case "ECHO":
 		return s.handleEcho(argv[1:])
+	case "SET":
+		return s.handleSet(argv[1:])
+	case "GET":
+		return s.handleGet(argv[1:])
+	case "DEL":
+		return s.handleDel(argv[1:])
+	case "INCR":
+		return s.handleIncr(argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,

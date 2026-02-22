@@ -71,7 +71,7 @@ func (srv *Server) handleSet(args []string) *resp.Resp {
 		ttl, _ = strconv.ParseInt(args[3], 10, 64)
 	}
 
-	&srv.store.Set(key, val, ttl)
+	srv.store.Set(key, val, ttl)
 
 	return &resp.Resp{
 		Type: resp.SimpleString,
@@ -88,7 +88,7 @@ func (srv *Server) handleGet(args []string) *resp.Resp {
 	}
 
 	key := args[0]
-	val, ok := db.Get(key)
+	val, ok := srv.store.Get(key)
 	if !ok {
 		return &resp.Resp{
 			Type: resp.BulkString,
@@ -99,5 +99,44 @@ func (srv *Server) handleGet(args []string) *resp.Resp {
 	return &resp.Resp{
 		Type: resp.BulkString,
 		Str:  &val,
+	}
+}
+
+func (srv *Server) handleIncr(args []string) *resp.Resp {
+	if len(args) != 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("Error wrong number of arguments for 'GET'"),
+		}
+	}
+
+	key := args[0]
+	val, err := srv.store.Incr(key)
+	if err != nil {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("Error occurred while incrementing value"),
+		}
+	}
+
+	return &resp.Resp{
+		Type: resp.Integer,
+		Int:  val,
+	}
+}
+
+func (s *Server) handleDel(args []string) *resp.Resp {
+	if len(args) < 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for command 'DEL'"),
+		}
+	}
+
+	cnt := s.store.Del(args)
+
+	return &resp.Resp{
+		Type: resp.Integer,
+		Int:  int64(cnt),
 	}
 }
