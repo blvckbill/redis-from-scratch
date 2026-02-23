@@ -140,3 +140,20 @@ func (s *Server) handleDel(args []string) *resp.Resp {
 		Int:  int64(cnt),
 	}
 }
+
+func (s *Server) handleTTL(args []string) *resp.Resp {
+	if len(args) != 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'TTL'"),
+		}
+	}
+
+	key := args[0]
+	ttl := s.store.TTL(key)
+
+	return &resp.Resp{
+		Type: resp.Integer,
+		Int:  ttl,
+	}
+}

@@ -125,6 +125,8 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 		return s.handleDel(argv[1:])
 	case "INCR":
 		return s.handleIncr(argv[1:])
+	case "TTL":
+		return s.handleTTL(argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,

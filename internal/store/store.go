@@ -139,3 +139,30 @@ func (s *Store) Del(keys []string) int {
 
 	return count
 }
+
+func (s *Store) isExpired(val Value) bool {
+	return val.expiresAt > 0 && time.Now().Unix() > val.expiresAt
+}
+
+func (s *Store) TTL(key string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, ok := s.data[key]
+
+	if s.isExpired(val) {
+		delete(s.data, key)
+		return -2
+	}
+
+	if !ok {
+		return -2
+	}
+
+	if val.expiresAt == 0 {
+		return -1
+	}
+
+	ttl := val.expiresAt - time.Now().Unix()
+	return ttl
+}
