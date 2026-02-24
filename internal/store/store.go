@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -26,9 +28,13 @@ type Store struct {
 }
 
 func NewStore() *Store {
-	return &Store{
+	s := &Store{
 		data: make(map[string]Value),
 	}
+
+	go s.cleanupExpiredKeys()
+
+	return s
 }
 
 func (s *Store) Set(key string, value string, ttlSeconds int64) {
@@ -102,7 +108,7 @@ func (s *Store) Incr(key string) (int64, error) {
 	case StringEncoding:
 		parsed, err := strconv.ParseInt(val.strVal, 10, 64)
 		if err != nil {
-			return 0, nil
+			return 0, fmt.Errorf("value is not an integer")
 		}
 
 		parsed++
@@ -145,13 +151,14 @@ func (s *Store) isExpired(val Value) bool {
 }
 
 func (s *Store) TTL(key string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	s.mu.RLock()
 	val, ok := s.data[key]
+	s.mu.RUnlock()
 
 	if s.isExpired(val) {
+		s.mu.Lock()
 		delete(s.data, key)
+		s.mu.Unlock()
 		return -2
 	}
 
@@ -165,4 +172,49 @@ func (s *Store) TTL(key string) int64 {
 
 	ttl := val.expiresAt - time.Now().Unix()
 	return ttl
+}
+
+func (s *Store) cleanupExpiredKeys() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for range ticker.C {
+		s.mu.Lock()
+
+		// Collect keys with expiration
+		expKeys := make([]string, 0, len(s.data))
+		for k, v := range s.data {
+			if v.expiresAt > 0 {
+				expKeys = append(expKeys, k)
+			}
+		}
+
+		// If no expiring keys, skip this tick
+		if len(expKeys) == 0 {
+			s.mu.Unlock()
+			continue
+		}
+
+		// Pick a random subset
+		subsetSize := int(0.2 * float64(len(expKeys)))
+		if len(expKeys) < subsetSize {
+			subsetSize = len(expKeys)
+		}
+
+		for i := 0; i < subsetSize; i++ {
+			idx := randGen.Intn(len(expKeys))
+			key := expKeys[idx]
+			val := s.data[key]
+
+			if s.isExpired(val) {
+				delete(s.data, key)
+			}
+
+			// Remove from expKeys to avoid re-checking
+			expKeys = append(expKeys[:idx], expKeys[idx+1:]...)
+		}
+
+		s.mu.Unlock()
+	}
 }
