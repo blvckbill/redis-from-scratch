@@ -59,7 +59,7 @@ func (srv *Server) handleSet(args []string) *resp.Resp {
 	if len(args) < 2 {
 		return &resp.Resp{
 			Type: resp.Error,
-			Str:  strPtr("Error wrong number of arguments for 'SET'"),
+			Str:  strPtr("ERR wrong number of arguments for 'set' command"),
 		}
 	}
 
@@ -83,7 +83,7 @@ func (srv *Server) handleGet(args []string) *resp.Resp {
 	if len(args) != 1 {
 		return &resp.Resp{
 			Type: resp.Error,
-			Str:  strPtr("Error wrong number of arguments for 'GET'"),
+			Str:  strPtr("ERR wrong number of arguments for 'get' command"),
 		}
 	}
 
@@ -106,7 +106,7 @@ func (srv *Server) handleIncr(args []string) *resp.Resp {
 	if len(args) != 1 {
 		return &resp.Resp{
 			Type: resp.Error,
-			Str:  strPtr("Error wrong number of arguments for 'GET'"),
+			Str:  strPtr("ERR wrong number of arguments for 'incr' command"),
 		}
 	}
 
@@ -115,7 +115,7 @@ func (srv *Server) handleIncr(args []string) *resp.Resp {
 	if err != nil {
 		return &resp.Resp{
 			Type: resp.Error,
-			Str:  strPtr("Error occurred while incrementing value"),
+			Str:  strPtr("ERR value is not an integer or out of range"),
 		}
 	}
 
@@ -129,7 +129,7 @@ func (s *Server) handleDel(args []string) *resp.Resp {
 	if len(args) < 1 {
 		return &resp.Resp{
 			Type: resp.Error,
-			Str:  strPtr("ERR wrong number of arguments for command 'DEL'"),
+			Str:  strPtr("ERR wrong number of arguments for 'del' command"),
 		}
 	}
 
@@ -145,7 +145,7 @@ func (s *Server) handleTTL(args []string) *resp.Resp {
 	if len(args) != 1 {
 		return &resp.Resp{
 			Type: resp.Error,
-			Str:  strPtr("ERR wrong number of arguments for 'TTL'"),
+			Str:  strPtr("ERR wrong number of arguments for 'ttl' command"),
 		}
 	}
 

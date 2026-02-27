@@ -155,14 +155,14 @@ func (s *Store) TTL(key string) int64 {
 	val, ok := s.data[key]
 	s.mu.RUnlock()
 
+	if !ok {
+		return -2
+	}
+
 	if s.isExpired(val) {
 		s.mu.Lock()
 		delete(s.data, key)
 		s.mu.Unlock()
-		return -2
-	}
-
-	if !ok {
 		return -2
 	}
 
