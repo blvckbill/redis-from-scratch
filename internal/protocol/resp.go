@@ -22,8 +22,10 @@ type Resp struct {
 	Array []*Resp
 }
 
-// Parser parses a RESP message from the given byte slice.
-// It returns the parsed Resp object, the number of bytes consumed, and a boolean indicating success.
+/*
+respToString is a helper function that converts a RESP object to a string if it is of type SimpleString or BulkString.
+It returns the string and a boolean indicating whether the conversion was successful.
+*/
 func Parser(buffer []byte) (*Resp, int, bool) {
 	if len(buffer) == 0 {
 		return nil, 0, false

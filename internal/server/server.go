@@ -9,10 +9,22 @@ import (
 	"strings"
 
 	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
+	"github.com/blvckbill/redis-from-scratch/internal/store"
 )
 
-func Start() {
-	addr := ":6369"
+type Server struct {
+	store *store.Store
+}
+
+func NewServer() *Server {
+	var db = store.NewStore()
+	return &Server{
+		store: db,
+	}
+}
+
+func (s *Server) Start() {
+	addr := "127.0.0.1:6369"
 	// Create a TCP listening socket bound to the address.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -36,17 +48,17 @@ func Start() {
 			log.Fatalf("Accept error: %v", err)
 		}
 		// once there is a connection, hand it off to another process using go concurrency so bloacking is avoided
-		go handleConnection(conn)
+		go s.handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Connection established successfully")
 	// create a buffer to read data from the connection and write it back to the client
 	readBuf := make([]byte, 1024)
 	var buffer []byte
-
+	// create a loop to read from the connection into the buffer and write back to the client
 	for {
 		n, err := conn.Read(readBuf)
 		if err != nil {
@@ -57,18 +69,26 @@ func handleConnection(conn net.Conn) {
 				break
 			}
 		}
-
+		// append the read data to the buffer and try to parse it as RESP
 		buffer = append(buffer, readBuf[:n]...)
 		for {
+			// Try to parse the buffer as RESP, if successful, execute the command and write the response back to the client
 			parsedResp, consumed, ok := resp.Parser(buffer)
 			if !ok {
 				break
 			}
+			// Remove the parsed command from the buffer
 			buffer = buffer[consumed:]
 
 			fmt.Printf("Parsed RESP: %+v\n", parsedResp)
-			parsed := commandExecution(parsedResp)
-			bytes_parsed := respEncoder(parsed)
+			// Execute the command and write the response back to the client
+			parsed, ok := ParsedRespToStrings(parsedResp)
+			if !ok {
+				log.Printf("Error parsing RESP to strings")
+				return
+			}
+			response := s.commandExecution(parsed)
+			bytes_parsed := respEncoder(response)
 
 			_, err := conn.Write(bytes_parsed)
 
@@ -81,25 +101,32 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-// listen for conn - call accept - read from conn into buffer - call parser on buffer after completion - returns structured resp - if command, handle using command execution - returns resp object in structured format - encode back into bytes - write to conn
-func commandExecution(r *resp.Resp) *resp.Resp {
-	if len(r.Array) == 0 {
+/*
+commandExecution takes a slice of strings representing the command and its arguments,
+executes the command, and returns a RESP response.
+*/
+func (s *Server) commandExecution(argv []string) *resp.Resp {
+	if len(argv) == 0 {
 		return nil
 	}
-	if r.Type != resp.Array {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR unknown command"),
-		}
-	}
 
-	cmd := strings.ToUpper(*r.Array[0].Str)
+	cmd := strings.ToUpper(argv[0])
 
-	switch cmd {
+	switch cmd { // refactor to use interfaces
 	case "PING":
-		return handlePing(r.Array[1:])
+		return s.handlePing(argv[1:])
 	case "ECHO":
-		return handleEcho(r.Array[1:])
+		return s.handleEcho(argv[1:])
+	case "SET":
+		return s.handleSet(argv[1:])
+	case "GET":
+		return s.handleGet(argv[1:])
+	case "DEL":
+		return s.handleDel(argv[1:])
+	case "INCR":
+		return s.handleIncr(argv[1:])
+	case "TTL":
+		return s.handleTTL(argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,
@@ -108,64 +135,17 @@ func commandExecution(r *resp.Resp) *resp.Resp {
 	}
 }
 
-func handlePing(args []*resp.Resp) *resp.Resp {
-	if len(args) == 0 {
-		return &resp.Resp{
-			Type: resp.SimpleString,
-			Str:  strPtr("PONG"),
-		}
-	}
-
-	if len(args) > 1 {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR wrong number of arguments for 'ping' command"),
-		}
-	}
-
-	// PING with message
-	str, ok := respToString(args[0])
-	if !ok {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR invalid argument for 'PING'"),
-		}
-	}
-
-	return &resp.Resp{
-		Type: resp.BulkString,
-		Str:  &str,
-	}
-}
-
-func handleEcho(args []*resp.Resp) *resp.Resp {
-	if len(args) < 1 {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR nothing to ECHO"),
-		}
-	}
-	for _, el := args {
-		
-	}
-	str, ok := respToString(echo_args)
-	if !ok {
-		return &resp.Resp{
-			Type: resp.Error,
-			Str:  strPtr("ERR invalid argument for 'ECHO'"),
-		}
-	}
-
-	return &resp.Resp{
-		Type: resp.BulkString,
-		Str:  &str,
-	}
-}
-
+// strPtr is a helper function to create a pointer to a string literal.
 func strPtr(s string) *string {
 	return &s
 }
 
+/*
+respToString takes a RESP object and converts it to a string if possible.
+It returns the string and a boolean indicating whether the conversion was successful.
+Only RESP types that can be represented as strings (BulkString, SimpleString, Integer) are converted.
+Other types will return an empty string and false.
+*/
 func respToString(r *resp.Resp) (string, bool) {
 	switch r.Type {
 	case resp.BulkString, resp.SimpleString:
@@ -182,6 +162,28 @@ func respToString(r *resp.Resp) (string, bool) {
 	}
 }
 
+/*
+ParsedRespToStrings takes a parsed RESP command and converts
+it to a slice of strings representing the command and its arguments.
+*/
+func ParsedRespToStrings(r *resp.Resp) ([]string, bool) {
+	var argv []string
+	for _, arg := range r.Array {
+		s, ok := respToString(arg)
+		if !ok {
+			log.Printf("Error converting RESP to string: %v", arg)
+			return nil, false
+		}
+		argv = append(argv, s)
+	}
+	return argv, true
+}
+
+/*
+respEncoder takes a RESP object and encodes it into a byte slice that can be sent back to the client.
+It handles all RESP types (SimpleString, Error, Integer, BulkString, Array) and returns the appropriate RESP format as bytes.
+If an unknown RESP type is encountered, it returns an error message in RESP format.
+*/
 func respEncoder(r *resp.Resp) []byte {
 	switch r.Type {
 
@@ -194,14 +196,14 @@ func respEncoder(r *resp.Resp) []byte {
 	case resp.Integer:
 		return []byte(":" + strconv.FormatInt(r.Int, 10) + "\r\n")
 
-	case resp.BulkString: //$4/r/nPING/r/n
+	case resp.BulkString:
 		if r.Str == nil {
 			return []byte("$-1\r\n")
 		}
 		s := *r.Str
 		return []byte("$" + strconv.Itoa(len(s)) + "\r\n" + s + "\r\n")
 
-	case resp.Array: //*2\r\n$4\r\nECHO\r\n$5\r\nhello\r\n
+	case resp.Array:
 		if r.Array == nil {
 			return []byte("*-1\r\n")
 		}
@@ -216,19 +218,3 @@ func respEncoder(r *resp.Resp) []byte {
 	}
 	return []byte("-ERR unknown RESP type\r\n")
 }
-
-// func RetryWithBackoff(ln net.Listener) (net.Conn, error) {
-// 	backoff := 1 * time.Second
-
-// 	for i := 0; i < 3; i++ {
-// 		conn, err := ln.Accept()
-// 		if err == nil {
-// 			return conn, nil
-// 		}
-// 		fmt.Printf("Attemp %d failed, retrying in %v...", i+1, backoff)
-
-// 		time.Sleep(backoff)
-// 		backoff *= 2
-// 	}
-// 	return nil, fmt.Errorf("Failed after 3 attempts")
-// }
