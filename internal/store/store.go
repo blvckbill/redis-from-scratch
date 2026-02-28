@@ -43,7 +43,7 @@ func (s *Store) Set(key string, value string, ttlSeconds int64) {
 
 	var expires int64
 	if ttlSeconds > 0 {
-		expires = time.Now().Unix() + ttlSeconds
+		expires = time.Now().UnixMilli() + (ttlSeconds * 1000)
 	}
 
 	s.data[key] = Value{
@@ -147,7 +147,7 @@ func (s *Store) Del(keys []string) int {
 }
 
 func (s *Store) isExpired(val Value) bool {
-	return val.expiresAt > 0 && time.Now().Unix() > val.expiresAt
+	return val.expiresAt > 0 && time.Now().UnixMilli() > val.expiresAt
 }
 
 func (s *Store) TTL(key string) int64 {
@@ -170,7 +170,10 @@ func (s *Store) TTL(key string) int64 {
 		return -1
 	}
 
-	ttl := val.expiresAt - time.Now().Unix()
+	ttl := (val.expiresAt - time.Now().UnixMilli()) / 1000
+	if ttl <= 0 {
+		ttl = 0
+	}
 	return ttl
 }
 
