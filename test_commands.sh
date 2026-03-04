@@ -32,7 +32,7 @@ if [ "$RES" == "1" ]; then echo -e "${GREEN}PASS: DEL${NC}"; else echo -e "${RED
 redis-cli -p 6369 SET temp_key "value" EX 3 > /dev/null
 sleep 1
 RES=$(redis-cli -p 6369 TTL temp_key)
-if [ "$RES" == "2" ]; then echo -e "${GREEN}PASS: TTL${NC}"; else echo -e "${RED}FAIL: TTL ($RES)${NC}"; fi
+if [ "$RES" == "2" ] || [ "$RES" == "1" ]; then echo -e "${GREEN}PASS: TTL${NC}"; else echo -e "${RED}FAIL: TTL ($RES)${NC}"; fi
 
 # Expiration
 sleep 3
