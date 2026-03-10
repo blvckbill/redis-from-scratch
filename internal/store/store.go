@@ -248,7 +248,7 @@ func (h *ExpirationHeap) Pop() any {
 // --- Background cleanup ---
 
 func (s *Store) cleanupExpiredKeys() {
-	// matches Redis: runs ~10 times per second
+	// runs ~10 times per second
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -275,7 +275,7 @@ func (s *Store) cleanupExpiredKeys() {
 				now := time.Now().UnixMilli()
 				soonThreshold := now + 30000
 
-				// Step 1: sweep heap first
+				// sweep heap first
 				// these are keys we already flagged as expiring soon
 				for s.evictHeap.Len() > 0 {
 					item := s.evictHeap[0]
@@ -288,7 +288,7 @@ func (s *Store) cleanupExpiredKeys() {
 					}
 				}
 
-				// Step 2: randomly sample the store
+				// randomly sample the store
 				candidates := make([]string, 0, len(s.data))
 				for k, v := range s.data {
 					if v.expiresAt > 0 {

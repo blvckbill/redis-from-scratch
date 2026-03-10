@@ -14,6 +14,7 @@ import (
 
 type Server struct {
 	store *store.Store
+	aof   *AOFLogger
 }
 
 func NewServer() *Server {
