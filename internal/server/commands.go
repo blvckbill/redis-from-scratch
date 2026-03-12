@@ -1,10 +1,8 @@
 package server
 
 import (
-	"os"
 	"strconv"
 	"strings"
-	"sync"
 
 	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
 )
@@ -158,27 +156,4 @@ func (s *Server) handleTTL(args []string) *resp.Resp {
 		Type: resp.Integer,
 		Int:  ttl,
 	}
-}
-
-type AOFLogger struct {
-	file *os.File
-	mu   sync.RWMutex
-}
-
-func NewAOFLogger(path string) (*AOFLogger, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, err
-	}
-
-	return &AOFLogger{
-		file: file,
-	}, nil
-}
-func (a *AOFLogger) Append(cmd []byte) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	_, err := a.file.Write(cmd)
-	return err
 }

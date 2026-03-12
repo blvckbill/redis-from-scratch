@@ -19,8 +19,14 @@ type Server struct {
 
 func NewServer() *Server {
 	var db = store.NewStore()
+	aofLogger, err := NewAOFLogger("appendonly.aof")
+	if err != nil {
+		log.Fatalf("Fatal: could not create AOF logger: %v", err)
+	}
+
 	return &Server{
 		store: db,
+		aof:   aofLogger,
 	}
 }
 
@@ -113,19 +119,20 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 
 	cmd := strings.ToUpper(argv[0])
 
+	var response *resp.Resp
 	switch cmd { // refactor to use interfaces
 	case "PING":
 		return s.handlePing(argv[1:])
 	case "ECHO":
 		return s.handleEcho(argv[1:])
 	case "SET":
-		return s.handleSet(argv[1:])
+		response = s.handleSet(argv[1:])
 	case "GET":
 		return s.handleGet(argv[1:])
 	case "DEL":
-		return s.handleDel(argv[1:])
+		response = s.handleDel(argv[1:])
 	case "INCR":
-		return s.handleIncr(argv[1:])
+		response = s.handleIncr(argv[1:])
 	case "TTL":
 		return s.handleTTL(argv[1:])
 	default:
@@ -134,6 +141,29 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 			Str:  strPtr("ERR unknown command"),
 		}
 	}
+	if response.Type != resp.Error {
+		cmdBytes := encodeCommand(argv)
+		if err := s.aof.Append(cmdBytes); err != nil {
+			log.Printf("AOF append error: %v", err)
+		}
+	}
+
+	return response
+}
+
+func encodeCommand(argv []string) []byte {
+	r := &resp.Resp{
+		Type:  resp.Array,
+		Array: make([]*resp.Resp, len(argv)),
+	}
+	for i, arg := range argv {
+		s := arg
+		r.Array[i] = &resp.Resp{
+			Type: resp.BulkString,
+			Str:  &s,
+		}
+	}
+	return respEncoder(r)
 }
 
 // strPtr is a helper function to create a pointer to a string literal.
