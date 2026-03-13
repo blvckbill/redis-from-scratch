@@ -13,8 +13,9 @@ import (
 )
 
 type Server struct {
-	store *store.Store
-	aof   *AOFLogger
+	store       *store.Store
+	aof         *AOFLogger
+	isReplaying bool
 }
 
 func NewServer() *Server {
@@ -24,10 +25,15 @@ func NewServer() *Server {
 		log.Fatalf("Fatal: could not create AOF logger: %v", err)
 	}
 
-	return &Server{
+	s := &Server{
 		store: db,
 		aof:   aofLogger,
 	}
+	s.isReplaying = true
+	aofLogger.Replay(s)
+	s.isReplaying = false
+
+	return s
 }
 
 func (s *Server) Start() {
@@ -63,7 +69,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Connection established successfully")
 	// create a buffer to read data from the connection and write it back to the client
-	readBuf := make([]byte, 1024)
+	readBuf := make([]byte, 4096)
 	var buffer []byte
 	// create a loop to read from the connection into the buffer and write back to the client
 	for {
@@ -143,8 +149,10 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 	}
 	if response.Type != resp.Error {
 		cmdBytes := encodeCommand(argv)
-		if err := s.aof.Append(cmdBytes); err != nil {
-			log.Printf("AOF append error: %v", err)
+		if !s.isReplaying {
+			if err := s.aof.Append(cmdBytes); err != nil {
+				log.Printf("AOF append error: %v", err)
+			}
 		}
 	}
 
