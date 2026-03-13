@@ -3,6 +3,7 @@ package store
 import (
 	"container/heap"
 	"fmt"
+	"log"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -14,12 +15,14 @@ type Encoding int
 const (
 	StringEncoding Encoding = iota
 	IntEncoding
+	ListEncoding
 )
 
 type Value struct {
 	encoding  Encoding
 	strVal    string
 	intVal    int64
+	listVal   []string
 	expiresAt int64 // stored in milliseconds
 }
 
@@ -210,6 +213,145 @@ func (s *Store) TTL(key string) int64 {
 		ttl = 0
 	}
 	return ttl
+}
+
+func (s *Store) LPush(key string, values ...string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, ok := s.data[key]
+	if !ok {
+		s.data[key] = Value{
+			encoding: ListEncoding,
+			listVal:  make([]string, 0),
+		}
+		val = s.data[key]
+	}
+
+	if val.encoding != ListEncoding {
+		log.Printf("ERR WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	// prepend values
+	val.listVal = append(values, val.listVal...)
+	s.data[key] = val
+	return len(val.listVal)
+}
+
+func (s *Store) RPush(key string, values ...string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, ok := s.data[key]
+	if !ok {
+		s.data[key] = Value{
+			encoding: ListEncoding,
+			listVal:  make([]string, 0),
+		}
+		val = s.data[key]
+	}
+
+	if val.encoding != ListEncoding {
+		log.Printf("ERR WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	// append values
+	val.listVal = append(val.listVal, values...)
+	s.data[key] = val
+	return len(val.listVal)
+}
+
+func (s *Store) LPop(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, ok := s.data[key]
+
+	if !ok || val.encoding != ListEncoding || len(val.listVal) == 0 {
+		return "", false
+	}
+
+	item := val.listVal[0]
+
+	val.listVal = val.listVal[1:]
+
+	if len(val.listVal) == 0 {
+		delete(s.data, key)
+	} else {
+		s.data[key] = val
+	}
+
+	return item, true
+}
+
+func (s *Store) RPop(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, ok := s.data[key]
+
+	if !ok || val.encoding != ListEncoding || len(val.listVal) == 0 {
+		return "", false
+	}
+
+	idx := len(val.listVal) - 1
+	item := val.listVal[idx]
+
+	val.listVal = val.listVal[:idx]
+
+	if len(val.listVal) == 0 {
+		delete(s.data, key)
+	} else {
+		s.data[key] = val
+	}
+
+	return item, true
+}
+
+func (s *Store) LRange(key string, start, stop int) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	val, ok := s.data[key]
+	if !ok {
+		return []string{}
+	}
+
+	if val.encoding != ListEncoding {
+		log.Printf("ERR WRONGTYPE Operation against a key holding the wrong kind of value")
+		return []string{}
+	}
+
+	list := val.listVal
+	length := len(list)
+
+	if length == 0 {
+		return []string{}
+	}
+
+	// handle negative indexes
+	if start < 0 {
+		start = length + start
+	}
+	if stop < 0 {
+		stop = length + stop
+	}
+
+	// clamp start
+	if start < 0 {
+		start = 0
+	}
+
+	// clamp stop
+	if stop >= length {
+		stop = length - 1
+	}
+
+	// if start is beyond list or start > stop → empty result
+	if start >= length || start > stop {
+		return []string{}
+	}
+
+	// Redis stop is inclusive, Go slices are exclusive
+	return list[start : stop+1]
 }
 
 // --- Heap ---

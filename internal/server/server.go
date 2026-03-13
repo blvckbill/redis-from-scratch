@@ -141,6 +141,16 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 		response = s.handleIncr(argv[1:])
 	case "TTL":
 		return s.handleTTL(argv[1:])
+	case "LPUSH":
+		response = s.handleLPush(argv[1:])
+	case "RPUSH":
+		response = s.handleRPush(argv[1:])
+	case "LPOP":
+		response = s.handleLPop(argv[1:])
+	case "RPOP":
+		response = s.handleRPop(argv[1:])
+	case "LRANGE":
+		return s.handleLRange(argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,

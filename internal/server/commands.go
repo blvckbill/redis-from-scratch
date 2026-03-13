@@ -157,3 +157,129 @@ func (s *Server) handleTTL(args []string) *resp.Resp {
 		Int:  ttl,
 	}
 }
+
+func (s *Server) handleLPush(args []string) *resp.Resp {
+	if len(args) < 2 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'LPUSH'"),
+		}
+	}
+
+	key := args[0]
+	values := args[1:]
+
+	length := s.store.LPush(key, values...)
+
+	return &resp.Resp{
+		Type: resp.Integer,
+		Int:  int64(length),
+	}
+}
+
+func (s *Server) handleRPush(args []string) *resp.Resp {
+	if len(args) < 2 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'RPUSH'"),
+		}
+	}
+
+	key := args[0]
+	values := args[1:]
+
+	length := s.store.RPush(key, values...)
+
+	return &resp.Resp{
+		Type: resp.Integer,
+		Int:  int64(length),
+	}
+}
+
+func (s *Server) handleLPop(args []string) *resp.Resp {
+	if len(args) != 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'LPOP'"),
+		}
+	}
+
+	key := args[0]
+
+	val, ok := s.store.LPop(key)
+
+	if !ok {
+		return &resp.Resp{
+			Type: resp.BulkString,
+			Str:  nil,
+		}
+	}
+
+	return &resp.Resp{
+		Type: resp.BulkString,
+		Str:  &val,
+	}
+}
+
+func (s *Server) handleRPop(args []string) *resp.Resp {
+	if len(args) != 1 {
+		return &resp.Resp{
+			Type: resp.BulkString,
+			Str:  nil,
+		}
+	}
+
+	key := args[0]
+
+	val, ok := s.store.RPop(key)
+
+	if !ok {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR key does not exist"),
+		}
+	}
+
+	return &resp.Resp{
+		Type: resp.BulkString,
+		Str:  &val,
+	}
+}
+
+func (s *Server) handleLRange(args []string) *resp.Resp {
+	if len(args) != 3 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'LRANGE'"),
+		}
+	}
+
+	key := args[0]
+
+	start, err1 := strconv.Atoi(args[1])
+	stop, err2 := strconv.Atoi(args[2])
+
+	if err1 != nil || err2 != nil {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR value is not an integer or out of range"),
+		}
+	}
+
+	values := s.store.LRange(key, start, stop)
+
+	respArr := make([]*resp.Resp, len(values))
+
+	for i, v := range values {
+		val := v
+		respArr[i] = &resp.Resp{
+			Type: resp.BulkString,
+			Str:  &val,
+		}
+	}
+
+	return &resp.Resp{
+		Type:  resp.Array,
+		Array: respArr,
+	}
+}
