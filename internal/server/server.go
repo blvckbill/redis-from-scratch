@@ -7,20 +7,38 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
 	"github.com/blvckbill/redis-from-scratch/internal/store"
 )
 
 type Server struct {
-	store *store.Store
+	store       *store.Store
+	aof         *AOFLogger
+	channels    map[string]map[net.Conn]bool
+	pubsubMu    sync.RWMutex
+	isReplaying bool
 }
 
 func NewServer() *Server {
 	var db = store.NewStore()
-	return &Server{
-		store: db,
+	aofLogger, err := NewAOFLogger("appendonly.aof")
+	channels := make(map[string]map[net.Conn]bool)
+	if err != nil {
+		log.Fatalf("Fatal: could not create AOF logger: %v", err)
 	}
+
+	s := &Server{
+		store:    db,
+		aof:      aofLogger,
+		channels: channels,
+	}
+	s.isReplaying = true
+	aofLogger.Replay(s)
+	s.isReplaying = false
+
+	return s
 }
 
 func (s *Server) Start() {
@@ -56,7 +74,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Connection established successfully")
 	// create a buffer to read data from the connection and write it back to the client
-	readBuf := make([]byte, 1024)
+	readBuf := make([]byte, 4096)
 	var buffer []byte
 	// create a loop to read from the connection into the buffer and write back to the client
 	for {
@@ -87,16 +105,19 @@ func (s *Server) handleConnection(conn net.Conn) {
 				log.Printf("Error parsing RESP to strings")
 				return
 			}
-			response := s.commandExecution(parsed)
-			bytes_parsed := respEncoder(response)
+			response := s.commandExecution(conn, parsed)
 
-			_, err := conn.Write(bytes_parsed)
+			if conn != nil && response != nil {
+				bytes_parsed := respEncoder(response)
 
-			if err != nil {
-				log.Printf("Error writing to connection: %v", err)
-				return
+				_, err := conn.Write(bytes_parsed)
+				if err != nil {
+					log.Printf("Error writing to connection: %v", err)
+					return
+				}
+
+				fmt.Printf("Sent response: %s", string(bytes_parsed))
 			}
-			fmt.Printf("Sent response: %s", string(bytes_parsed))
 		}
 	}
 }
@@ -105,34 +126,76 @@ func (s *Server) handleConnection(conn net.Conn) {
 commandExecution takes a slice of strings representing the command and its arguments,
 executes the command, and returns a RESP response.
 */
-func (s *Server) commandExecution(argv []string) *resp.Resp {
+func (s *Server) commandExecution(conn net.Conn, argv []string) *resp.Resp {
 	if len(argv) == 0 {
 		return nil
 	}
 
 	cmd := strings.ToUpper(argv[0])
 
+	var response *resp.Resp
 	switch cmd { // refactor to use interfaces
 	case "PING":
 		return s.handlePing(argv[1:])
 	case "ECHO":
 		return s.handleEcho(argv[1:])
 	case "SET":
-		return s.handleSet(argv[1:])
+		response = s.handleSet(argv[1:])
 	case "GET":
 		return s.handleGet(argv[1:])
 	case "DEL":
-		return s.handleDel(argv[1:])
+		response = s.handleDel(argv[1:])
 	case "INCR":
-		return s.handleIncr(argv[1:])
+		response = s.handleIncr(argv[1:])
 	case "TTL":
 		return s.handleTTL(argv[1:])
+	case "LPUSH":
+		response = s.handleLPush(argv[1:])
+	case "RPUSH":
+		response = s.handleRPush(argv[1:])
+	case "LPOP":
+		response = s.handleLPop(argv[1:])
+	case "RPOP":
+		response = s.handleRPop(argv[1:])
+	case "LRANGE":
+		return s.handleLRange(argv[1:])
+	case "SUBSCRIBE":
+		return s.handleSubscribe(conn, argv[1:])
+	case "PUBLISH":
+		response = s.handlePublish(argv[1:])
+	case "UNSUBSCRIBE":
+		return s.handleUnsubscribe(conn, argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,
 			Str:  strPtr("ERR unknown command"),
 		}
 	}
+	if response.Type != resp.Error {
+		cmdBytes := encodeCommand(argv)
+		if !s.isReplaying {
+			if err := s.aof.Append(cmdBytes); err != nil {
+				log.Printf("AOF append error: %v", err)
+			}
+		}
+	}
+
+	return response
+}
+
+func encodeCommand(argv []string) []byte {
+	r := &resp.Resp{
+		Type:  resp.Array,
+		Array: make([]*resp.Resp, len(argv)),
+	}
+	for i, arg := range argv {
+		s := arg
+		r.Array[i] = &resp.Resp{
+			Type: resp.BulkString,
+			Str:  &s,
+		}
+	}
+	return respEncoder(r)
 }
 
 // strPtr is a helper function to create a pointer to a string literal.
