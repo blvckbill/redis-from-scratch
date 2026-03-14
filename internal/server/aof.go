@@ -92,7 +92,7 @@ func (a *AOFLogger) Replay(s *Server) error {
 			if !ok {
 				log.Printf("Error parsing RESP to strings")
 			}
-			s.commandExecution(parsed)
+			s.commandExecution(nil, parsed)
 		}
 	}
 	return nil

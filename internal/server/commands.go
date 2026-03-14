@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"strconv"
 	"strings"
 
@@ -282,4 +283,157 @@ func (s *Server) handleLRange(args []string) *resp.Resp {
 		Type:  resp.Array,
 		Array: respArr,
 	}
+}
+
+func (s *Server) handleSubscribe(conn net.Conn, args []string) *resp.Resp {
+	if len(args) < 1 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'SUBSCRIBE'"),
+		}
+	}
+
+	for _, ch := range args {
+		// add connection to channel
+		s.pubsubMu.Lock()
+		subs, ok := s.channels[ch]
+		if !ok {
+			subs = make(map[net.Conn]bool)
+			s.channels[ch] = subs
+		}
+		subs[conn] = true
+
+		// count how many channels this connection is subscribed to
+		count := 0
+		for _, subscribers := range s.channels {
+			if subscribers[conn] {
+				count++
+			}
+		}
+		s.pubsubMu.Unlock()
+
+		// send one response per channel
+		chName := ch
+		respArr := []*resp.Resp{
+			{Type: resp.BulkString, Str: strPtr("subscribe")},
+			{Type: resp.BulkString, Str: &chName},
+			{Type: resp.Integer, Int: int64(count)},
+		}
+		conn.Write(respEncoder(&resp.Resp{
+			Type:  resp.Array,
+			Array: respArr,
+		}))
+	}
+
+	return nil
+}
+
+func (s *Server) handlePublish(args []string) *resp.Resp {
+	if len(args) != 2 {
+		return &resp.Resp{
+			Type: resp.Error,
+			Str:  strPtr("ERR wrong number of arguments for 'PUBLISH'"),
+		}
+	}
+
+	channel := args[0]
+	message := args[1]
+
+	// build the message to push to each subscriber
+	notification := &resp.Resp{
+		Type: resp.Array,
+		Array: []*resp.Resp{
+			{Type: resp.BulkString, Str: strPtr("message")},
+			{Type: resp.BulkString, Str: &channel},
+			{Type: resp.BulkString, Str: &message},
+		},
+	}
+	encoded := respEncoder(notification)
+
+	s.pubsubMu.RLock()
+	subs, ok := s.channels[channel]
+	if !ok {
+		s.pubsubMu.RUnlock()
+		// no subscribers
+		return &resp.Resp{
+			Type: resp.Integer,
+			Int:  0,
+		}
+	}
+
+	// copy subscriber connections before releasing lock
+	// so we don't hold the lock while writing to each conn
+	receivers := make([]net.Conn, 0, len(subs))
+	for conn := range subs {
+		receivers = append(receivers, conn)
+	}
+	s.pubsubMu.RUnlock()
+
+	// write to each subscriber outside the lock
+	delivered := 0
+	for _, conn := range receivers {
+		_, err := conn.Write(encoded)
+		if err != nil {
+			// subscriber disconnected — remove them
+			s.pubsubMu.Lock()
+			delete(s.channels[channel], conn)
+			s.pubsubMu.Unlock()
+		} else {
+			delivered++
+		}
+	}
+
+	// return number of subscribers the message was delivered to
+	return &resp.Resp{
+		Type: resp.Integer,
+		Int:  int64(delivered),
+	}
+}
+
+func (s *Server) handleUnsubscribe(conn net.Conn, args []string) *resp.Resp {
+	// if no args, unsubscribe from all channels this conn is in
+	if len(args) == 0 {
+		s.pubsubMu.Lock()
+		for ch, subs := range s.channels {
+			if subs[conn] {
+				args = append(args, ch)
+			}
+		}
+		s.pubsubMu.Unlock()
+	}
+
+	for _, ch := range args {
+		s.pubsubMu.Lock()
+
+		// remove connection from this channel
+		if subs, ok := s.channels[ch]; ok {
+			delete(subs, conn)
+			// if channel is now empty, remove it entirely
+			if len(subs) == 0 {
+				delete(s.channels, ch)
+			}
+		}
+
+		// count remaining subscriptions for this connection
+		count := 0
+		for _, subs := range s.channels {
+			if subs[conn] {
+				count++
+			}
+		}
+		s.pubsubMu.Unlock()
+
+		chName := ch
+		respArr := []*resp.Resp{
+			{Type: resp.BulkString, Str: strPtr("unsubscribe")},
+			{Type: resp.BulkString, Str: &chName},
+			{Type: resp.Integer, Int: int64(count)},
+		}
+		conn.Write(respEncoder(&resp.Resp{
+			Type:  resp.Array,
+			Array: respArr,
+		}))
+	}
+
+	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	resp "github.com/blvckbill/redis-from-scratch/internal/protocol"
 	"github.com/blvckbill/redis-from-scratch/internal/store"
@@ -15,19 +16,23 @@ import (
 type Server struct {
 	store       *store.Store
 	aof         *AOFLogger
+	channels    map[string]map[net.Conn]bool
+	pubsubMu    sync.RWMutex
 	isReplaying bool
 }
 
 func NewServer() *Server {
 	var db = store.NewStore()
 	aofLogger, err := NewAOFLogger("appendonly.aof")
+	channels := make(map[string]map[net.Conn]bool)
 	if err != nil {
 		log.Fatalf("Fatal: could not create AOF logger: %v", err)
 	}
 
 	s := &Server{
-		store: db,
-		aof:   aofLogger,
+		store:    db,
+		aof:      aofLogger,
+		channels: channels,
 	}
 	s.isReplaying = true
 	aofLogger.Replay(s)
@@ -100,16 +105,19 @@ func (s *Server) handleConnection(conn net.Conn) {
 				log.Printf("Error parsing RESP to strings")
 				return
 			}
-			response := s.commandExecution(parsed)
-			bytes_parsed := respEncoder(response)
+			response := s.commandExecution(conn, parsed)
 
-			_, err := conn.Write(bytes_parsed)
+			if conn != nil && response != nil {
+				bytes_parsed := respEncoder(response)
 
-			if err != nil {
-				log.Printf("Error writing to connection: %v", err)
-				return
+				_, err := conn.Write(bytes_parsed)
+				if err != nil {
+					log.Printf("Error writing to connection: %v", err)
+					return
+				}
+
+				fmt.Printf("Sent response: %s", string(bytes_parsed))
 			}
-			fmt.Printf("Sent response: %s", string(bytes_parsed))
 		}
 	}
 }
@@ -118,7 +126,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 commandExecution takes a slice of strings representing the command and its arguments,
 executes the command, and returns a RESP response.
 */
-func (s *Server) commandExecution(argv []string) *resp.Resp {
+func (s *Server) commandExecution(conn net.Conn, argv []string) *resp.Resp {
 	if len(argv) == 0 {
 		return nil
 	}
@@ -151,6 +159,12 @@ func (s *Server) commandExecution(argv []string) *resp.Resp {
 		response = s.handleRPop(argv[1:])
 	case "LRANGE":
 		return s.handleLRange(argv[1:])
+	case "SUBSCRIBE":
+		return s.handleSubscribe(conn, argv[1:])
+	case "PUBLISH":
+		response = s.handlePublish(argv[1:])
+	case "UNSUBSCRIBE":
+		return s.handleUnsubscribe(conn, argv[1:])
 	default:
 		return &resp.Resp{
 			Type: resp.Error,
